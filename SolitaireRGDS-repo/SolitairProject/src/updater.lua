@@ -61,7 +61,9 @@ local function start(self, command, dest)
     self.id = nextId()
     self.busy = true
     self.thread = love.thread.newThread("src/updater_thread.lua")
-    self.thread:start(self.id, command, self.base, dest)
+    local dir = love.filesystem.getSourceBaseDirectory and love.filesystem.getSourceBaseDirectory() or ""
+    if dir ~= "" then dir = dir .. "/" end
+    self.thread:start(self.id, command, self.base, dest or "", dir)
 end
 
 function Updater:check()

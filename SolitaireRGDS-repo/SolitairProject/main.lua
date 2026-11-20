@@ -121,9 +121,14 @@ love.update = guard("update", function(dt)
             background:draw(solitaire, renderer.fontTitle, renderer.fontMedium, renderer.fontSmall, true, game:topInfo())
         end, game:topKey(), function()
             background:drawPlain(solitaire, renderer.fontTitle, renderer.fontMedium, renderer.fontSmall, game:topInfo())
-        end)
+        end, game:topShouldAnimate(), dt)
     end
 end)
+
+-- A background thread (the updater) that fails must never close the game: LÖVE's default is to quit
+love.threaderror = function(thread, errorstr)
+    print("Thread error (ignored): " .. tostring(errorstr))
+end
 
 love.quit = function()
     if topscreen then pcall(function() topscreen:close() end) end

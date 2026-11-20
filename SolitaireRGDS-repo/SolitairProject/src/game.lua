@@ -101,6 +101,15 @@ function Game:act(fn, sound, opts)
     return ok
 end
 
+-- A card was dropped / placed somewhere it doesn't belong: error sound (assets/audio/error.mp3) and a short hint
+function Game:reject()
+    local now = love.timer.getTime()
+    if now - (self.lastReject or -1) < 0.25 then return end     -- no machine-gun errors
+    self.lastReject = now
+    self.assets:playSound("error")
+    self:toast("Can't go there", 1.2)
+end
+
 function Game:drawOne()
     local s = self.solitaire
     local ok = self:change(function() return s:drawOne() end)
@@ -690,6 +699,19 @@ function Game:updateUpdater(dt)
             love.event.quit()
         end
     end
+end
+
+function Game:toggleTopAnimation()
+    self.settings.topAnimation = (self.settings.topAnimation == "off") and "on" or "off"
+    Settings.save(self.settings)
+end
+
+-- Should the top screen keep moving right now? Not while the bottom screen needs every bit of speed.
+function Game:topShouldAnimate()
+    if self.settings.topAnimation == "off" then return false end
+    if not self.background:isAnimated() then return false end
+    if self.anim:isBusy() or self.controls.dragging or self.solitaire.finishing then return false end
+    return true
 end
 
 function Game:applyBrightness()

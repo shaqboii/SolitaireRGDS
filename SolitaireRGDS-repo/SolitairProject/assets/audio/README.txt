@@ -9,6 +9,7 @@ Supported sound filenames:
 - `draw.wav`    / `draw.ogg`    -> Played when drawing from stock (Y button or tap)
 - `shuffle.wav` / `shuffle.ogg` -> Played when starting a new deal
 - `undo.wav`    / `undo.ogg`    -> Played on Undo action
+- `error.wav`   / `error.ogg`   / `error.mp3` -> Played when a card is placed somewhere it can't go
 - `win.wav`     / `win.ogg`     -> Played on victory
 
 NOTE:

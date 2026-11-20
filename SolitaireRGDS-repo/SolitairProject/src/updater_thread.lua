@@ -4,7 +4,11 @@
 --
 -- Needs curl or wget on the device. All downloads are HTTPS from GitHub; certificates are NOT skipped.
 
-local id, command, base, dest = ...
+-- (modules must be loaded by hand inside a thread)
+require("love.thread")
+require("love.timer")
+
+local id, command, base, dest, tmpdir = ...
 local out = love.thread.getChannel("updater_out")
 
 local function reply(t) t.id = id; out:push(t) end
@@ -39,7 +43,19 @@ end
 -- Downloads url. If file is given it is saved there, otherwise the text is returned.
 local function fetch(url, file)
     if not tool then return nil, "Neither curl nor wget is installed on this device." end
-    local errPath = os.tmpname()
+    -- a scratch file for the tool's error text: next to the game (known to be writable), else the system's temp
+    local errPath
+    local function usable(path)
+        local f = path and io.open(path, "w")
+        if f then f:close(); return true end
+        return false
+    end
+    if tmpdir and tmpdir ~= "" and usable(tmpdir .. ".updater_err.txt") then
+        errPath = tmpdir .. ".updater_err.txt"
+    else
+        local okt, name = pcall(os.tmpname)
+        errPath = (okt and usable(name)) and name or "/dev/null"
+    end
     local cmd
     if tool == "curl" then
         cmd = "curl -fsSL --connect-timeout 8 --max-time " .. (file and 900 or 25) .. " "
@@ -53,12 +69,12 @@ local function fetch(url, file)
         status = os.execute(cmd)
     else
         local p = io.popen(cmd, "r")
-        if not p then os.remove(errPath); return nil, "Could not start " .. tool .. "." end
+        if not p then return nil, "Could not start " .. tool .. "." end
         text = p:read("*a")
         status = p:close()
     end
     local err = firstLine(readFile(errPath))
-    os.remove(errPath)
+    if errPath ~= "/dev/null" then os.remove(errPath) end
     if not ok(status) then
         if file then os.remove(file) end
         return nil, (err ~= "" and err) or "The download failed."
@@ -74,46 +90,54 @@ local function sha256(path)
     return line:match("^(%x+)")
 end
 
-if command == "check" then
-    local text, err = fetch(base .. "VERSION")
-    if not text then
-        return reply({ kind = "error", message = err, hint = tostring(err):find("404") and "noversion" or "network" })
-    end
-    local v = firstLine(text):match("^v?(%d+%.%d+%.%d+)")
-    if not v then
-        return reply({ kind = "error", message = "The release has no VERSION file yet.", hint = "noversion" })
-    end
-    return reply({ kind = "checked", remote = v })
+local function run()
+    if command == "check" then
+        local text, err = fetch(base .. "VERSION")
+        if not text then
+            return reply({ kind = "error", message = err, hint = tostring(err):find("404") and "noversion" or "network" })
+        end
+        local v = firstLine(text):match("^v?(%d+%.%d+%.%d+)")
+        if not v then
+            return reply({ kind = "error", message = "The release has no VERSION file yet.", hint = "noversion" })
+        end
+        return reply({ kind = "checked", remote = v })
 
-elseif command == "install" then
-    -- the published checksum first (so a tampered download can't pass)
-    local shaText, err = fetch(base .. "SHA256")
-    local expected = shaText and tostring(shaText):match("(%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x)")
-    if not expected then
-        return reply({ kind = "error", message = "The release has no SHA256 file.", hint = "nosha" })
+    elseif command == "install" then
+        -- the published checksum first (so a tampered download can't pass)
+        local shaText = fetch(base .. "SHA256")
+        local expected = shaText and tostring(shaText):match("(" .. string.rep("%x", 64) .. ")")
+        if not expected then
+            return reply({ kind = "error", message = "The release has no SHA256 file.", hint = "nosha" })
+        end
+        reply({ kind = "progress", message = "Downloading..." })
+        local good, derr = fetch(base .. "Solitaire.love", dest)
+        if not good then
+            return reply({ kind = "error", message = derr, hint = "network" })
+        end
+        local f = io.open(dest, "rb")
+        local magic, size
+        if f then magic = f:read(4); size = f:seek("end"); f:close() end
+        if magic ~= "PK\3\4" or not size or size < 50000 then
+            os.remove(dest)
+            return reply({ kind = "error", message = "The downloaded file is not a game package.", hint = "bad" })
+        end
+        local actual = sha256(dest)
+        if not actual then
+            os.remove(dest)
+            return reply({ kind = "error", message = "Can't check the download (no sha256sum on this device).", hint = "nosum" })
+        end
+        if actual:lower() ~= expected:lower() then
+            os.remove(dest)
+            return reply({ kind = "error", message = "The download is damaged (checksum mismatch). Nothing was changed.", hint = "bad" })
+        end
+        return reply({ kind = "downloaded", size = size })
     end
-    reply({ kind = "progress", message = "Downloading..." })
-    local good, derr = fetch(base .. "Solitaire.love", dest)
-    if not good then
-        return reply({ kind = "error", message = derr, hint = "network" })
-    end
-    local f = io.open(dest, "rb")
-    local magic, size
-    if f then magic = f:read(4); size = f:seek("end"); f:close() end
-    if magic ~= "PK\3\4" or not size or size < 50000 then
-        os.remove(dest)
-        return reply({ kind = "error", message = "The downloaded file is not a game package.", hint = "bad" })
-    end
-    local actual = sha256(dest)
-    if not actual then
-        os.remove(dest)
-        return reply({ kind = "error", message = "Can't check the download (no sha256sum on this device).", hint = "nosum" })
-    end
-    if actual:lower() ~= expected:lower() then
-        os.remove(dest)
-        return reply({ kind = "error", message = "The download is damaged (checksum mismatch). Nothing was changed.", hint = "bad" })
-    end
-    return reply({ kind = "downloaded", size = size })
+
+    reply({ kind = "error", message = "Unknown updater command." })
 end
 
-reply({ kind = "error", message = "Unknown updater command." })
+-- Never let an error escape: LÖVE treats a crashed thread as fatal for the whole game
+local okRun, errRun = pcall(run)
+if not okRun then
+    reply({ kind = "error", message = "Updater problem: " .. (tostring(errRun):gsub("^.-:%d+: ", "")), hint = "crash" })
+end

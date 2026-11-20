@@ -213,7 +213,7 @@ function Assets:loadCustomCards()
 end
 
 function Assets:loadAudio()
-    local sounds = {"flip", "place", "shuffle", "undo", "win", "draw"}
+    local sounds = {"flip", "place", "shuffle", "undo", "win", "draw", "error"}
     local found = {}
     for _, e in ipairs(Library.list("audio", {"wav", "ogg", "mp3"})) do
         found[e.name:lower()] = e

@@ -221,6 +221,11 @@ function Controls:handleAButton()
             moved = g:act(function() return s:moveToTableau(sel.source, sel.col, sel.cardIndex, focus.col) end, "place")
         end
         if moved then return end
+        -- tried to place it on a different pile and it doesn't fit
+        if (focus.zone == "foundation" or focus.zone == "tableau")
+            and not (sel.source == "tableau" and focus.zone == "tableau" and sel.col == focus.col) then
+            g:reject()
+        end
 
         if focus.card and focus.card.faceUp then
             self:selectFromFocus(focus)
@@ -408,6 +413,10 @@ function Controls:pointerPressed(x, y)
             moved = g:act(function() return s:moveToTableau(sel.source, sel.col, sel.cardIndex, hit.col) end, "place")
         end
         if moved then return end
+        if (hit.type == "foundation" or hit.type == "tableau")
+            and not (sel.source == "tableau" and hit.type == "tableau" and sel.col == hit.col) then
+            g:reject()
+        end
     end
 
     -- Pick up the tapped card (and start a drag)
@@ -511,6 +520,14 @@ function Controls:pointerReleased(x, y)
     end, "place")
 
     local wasRealDrag = self.dragMoved
+    -- dropped on a pile it doesn't fit (not its own pile, not empty felt)?
+    if not moved and wasRealDrag and sel then
+        local over = self:hitTest(x, y)
+        if over and (over.type == "foundation" or over.type == "tableau")
+            and not (sel.source == "tableau" and over.type == "tableau" and sel.col == over.col) then
+            g:reject()
+        end
+    end
     self:endDrag()
     -- a drag that went nowhere puts the card back and drops the selection
     if not moved and wasRealDrag then s.selection = nil end
