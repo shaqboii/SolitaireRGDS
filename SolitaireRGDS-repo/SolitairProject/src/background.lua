@@ -129,6 +129,12 @@ local function drawCover(img, w, h)
     love.graphics.draw(img, (w - iw * sc) / 2, (h - ih * sc) / 2, 0, sc, sc)
 end
 
+-- true when the picture changes by itself (the built-in scene, or an animated picture)
+function Background:isAnimated()
+    if #self.customFrames > 1 then return true end
+    return #self.customFrames == 0 and self.customImage == nil
+end
+
 function Background:update(dt)
     self.time = self.time + dt
 

@@ -11,6 +11,7 @@ local ffi = require("ffi")
 
 local TopScreen = {}
 TopScreen.__index = TopScreen
+TopScreen.FPS_TIERS = { 30, 20, 12, 8, 4 }
 
 local CDEF = [[
     typedef struct SDL_Window SDL_Window;
@@ -146,7 +147,7 @@ end
 -- Draws the top-screen picture when the game state changed. drawFn does the drawing;
 -- fallbackFn (optional) is a plain picture used if drawFn fails, so the screen is never left black.
 -- extraKey: any other text that changes what the picture shows (menu open, background name, ...)
-function TopScreen:update(solitaire, drawFn, extraKey, fallbackFn)
+function TopScreen:update(solitaire, drawFn, extraKey, fallbackFn, animate, dt)
     if not self.active then return end
 
     local now = love.timer.getTime()
@@ -158,6 +159,25 @@ function TopScreen:update(solitaire, drawFn, extraKey, fallbackFn)
     }, "|")
 
     local changed = (key ~= self.lastKey)
+
+    -- Smooth animation: redraw the moving background several times a second. Copying a whole picture to the
+    -- other screen is the expensive part, so the rate adapts: if drawing it costs too much time, or the
+    -- bottom screen starts to lag, it steps down (30 -> 20 -> 12 -> 8 -> 4 pictures a second).
+    local animFrame = false
+    if animate then
+        local tiers = TopScreen.FPS_TIERS
+        self.tier = self.tier or 2
+        if now - (self.lastAnim or 0) >= 1 / tiers[self.tier] - 0.004 then
+            animFrame = true
+            changed = true
+        end
+        if dt then
+            self.dtSum = (self.dtSum or 0) + dt
+            self.dtN = (self.dtN or 0) + 1
+        end
+    end
+    local drawStart = now
+
     -- On this handheld SDL's KMSDRM drops the first frames it is given (Banana Player documents the same),
     -- so a picture that doesn't change must be sent again and again: every 0.1 s for the first 8 s after
     -- start (and for 2 s after any change), then every 2 s.
@@ -221,6 +241,31 @@ function TopScreen:update(solitaire, drawFn, extraKey, fallbackFn)
     -- ...so always give LOVE its context back, even after an error
     sdl.SDL_GL_MakeCurrent(self.loveWin, self.loveCtx)
 
+    if animFrame then
+        self.lastAnim = now
+        local cost = love.timer.getTime() - drawStart
+        self.costSum = (self.costSum or 0) + cost
+        self.costN = (self.costN or 0) + 1
+        if self.costN >= 30 then
+            local avgCost = self.costSum / self.costN
+            local avgDt = (self.dtN and self.dtN > 0) and (self.dtSum / self.dtN) or 0
+            local tiers = TopScreen.FPS_TIERS
+            if (avgCost > 0.012 or avgDt > 0.026) and self.tier < #tiers then
+                self.tier = self.tier + 1
+                print(string.format("TopScreen: animation slowed to %d pictures/s (picture cost %.1f ms, frame %.1f ms)",
+                    tiers[self.tier], avgCost * 1000, avgDt * 1000))
+                self.good = 0
+            elseif avgCost < 0.007 and avgDt < 0.020 then
+                -- a long stretch without trouble: try a faster rate again
+                self.good = (self.good or 0) + 1
+                if self.good >= 8 and self.tier > 2 then
+                    self.tier = self.tier - 1
+                    self.good = 0
+                end
+            end
+            self.costSum, self.costN, self.dtSum, self.dtN = 0, 0, 0, 0
+        end
+    end
     if not ok then
         self.errors = (self.errors or 0) + 1
         print("TopScreen: error (" .. self.errors .. "): " .. tostring(err))
