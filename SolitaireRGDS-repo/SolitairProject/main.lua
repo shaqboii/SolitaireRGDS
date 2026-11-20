@@ -30,17 +30,49 @@ local scale = 1
 local offsetX = 0
 local offsetY = 0
 
--- If something goes wrong, write the error to log.txt and quit instead of freezing on a blank screen
+-- If something goes wrong, the error is written to log.txt AND shown on screen (instead of the game just
+-- vanishing). Any button or tap then closes the game.
+local crashMessage = nil
+local crashTime = 0
+local crashFonts = nil
+
 local function guard(name, fn)
+    local isInput = name:match("^gamepad") or name:match("^key") or name:match("^mouse") or name:match("^touch")
     return function(...)
-        if crashed then return end
+        if crashMessage then
+            -- leave the error on screen for a moment, then any input closes the game
+            if isInput and name:match("pressed$") and love.timer.getTime() - crashTime > 0.8 then
+                love.event.quit(1)
+            end
+            return
+        end
         local ok, err = xpcall(fn, debug.traceback, ...)
         if not ok then
-            crashed = true
             print("FATAL ERROR in " .. name .. ":\n" .. tostring(err))
-            love.event.quit(1)
+            crashMessage = "Error in " .. name .. ":\n" .. tostring(err)
+            crashTime = love.timer.getTime()
         end
     end
+end
+
+local function drawCrash()
+    local ok = pcall(function()
+        if not crashFonts then
+            crashFonts = { big = love.graphics.newFont(30), small = love.graphics.newFont(17) }
+        end
+        love.graphics.origin()
+        love.graphics.setScissor()
+        love.graphics.setColor(0.35, 0.05, 0.08, 1)
+        love.graphics.rectangle("fill", 0, 0, 1024, 768)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.setFont(crashFonts.big)
+        love.graphics.printf("Something went wrong", 32, 40, 960, "left")
+        love.graphics.setFont(crashFonts.small)
+        love.graphics.printf(tostring(crashMessage):sub(1, 1400), 32, 100, 960, "left")
+        love.graphics.printf("Press any button or tap the screen to close the game. The full error is in log.txt.",
+            32, 700, 960, "left")
+    end)
+    if not ok then love.event.quit(1) end
 end
 
 local function updateScaling()
@@ -135,7 +167,7 @@ love.quit = function()
     return false
 end
 
-love.draw = guard("draw", function()
+local drawGame = guard("draw", function()
     love.graphics.push()
     love.graphics.translate(offsetX, offsetY)
     love.graphics.scale(scale, scale)
@@ -144,6 +176,10 @@ love.draw = guard("draw", function()
 
     love.graphics.pop()
 end)
+
+love.draw = function()
+    if crashMessage then drawCrash() else drawGame() end
+end
 
 -- ========================================================
 -- INPUT ROUTING

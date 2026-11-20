@@ -11,7 +11,7 @@ local ffi = require("ffi")
 
 local TopScreen = {}
 TopScreen.__index = TopScreen
-TopScreen.FPS_TIERS = { 30, 20, 12, 8, 4 }
+TopScreen.SPEED = { 1, 0.75, 0.5, 0.35 }     -- share of the wanted pictures/s that is still sent
 
 local CDEF = [[
     typedef struct SDL_Window SDL_Window;
@@ -164,10 +164,13 @@ function TopScreen:update(solitaire, drawFn, extraKey, fallbackFn, animate, dt)
     -- other screen is the expensive part, so the rate adapts: if drawing it costs too much time, or the
     -- bottom screen starts to lag, it steps down (30 -> 20 -> 12 -> 8 -> 4 pictures a second).
     local animFrame = false
+    local rate = 0
     if animate then
-        local tiers = TopScreen.FPS_TIERS
-        self.tier = self.tier or 2
-        if now - (self.lastAnim or 0) >= 1 / tiers[self.tier] - 0.004 then
+        local tiers = TopScreen.SPEED
+        self.tier = self.tier or 1
+        local wanted = (type(animate) == "number") and animate or 15
+        rate = wanted * tiers[self.tier]
+        if now - (self.lastAnim or 0) >= 1 / rate - 0.004 then
             animFrame = true
             changed = true
         end
@@ -249,16 +252,16 @@ function TopScreen:update(solitaire, drawFn, extraKey, fallbackFn, animate, dt)
         if self.costN >= 30 then
             local avgCost = self.costSum / self.costN
             local avgDt = (self.dtN and self.dtN > 0) and (self.dtSum / self.dtN) or 0
-            local tiers = TopScreen.FPS_TIERS
+            local tiers = TopScreen.SPEED
             if (avgCost > 0.012 or avgDt > 0.026) and self.tier < #tiers then
                 self.tier = self.tier + 1
-                print(string.format("TopScreen: animation slowed to %d pictures/s (picture cost %.1f ms, frame %.1f ms)",
-                    tiers[self.tier], avgCost * 1000, avgDt * 1000))
+                print(string.format("TopScreen: animation slowed to %.1f pictures/s (picture cost %.1f ms, frame %.1f ms)",
+                    (type(animate) == "number" and animate or 15) * tiers[self.tier], avgCost * 1000, avgDt * 1000))
                 self.good = 0
             elseif avgCost < 0.007 and avgDt < 0.020 then
                 -- a long stretch without trouble: try a faster rate again
                 self.good = (self.good or 0) + 1
-                if self.good >= 8 and self.tier > 2 then
+                if self.good >= 8 and self.tier > 1 then
                     self.tier = self.tier - 1
                     self.good = 0
                 end

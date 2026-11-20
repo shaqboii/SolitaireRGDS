@@ -597,15 +597,31 @@ end
 -- UPDATES (menu > Check for updates)
 -- ========================================================
 
+local function updaterProblem(self, err)
+    print("Updater: unexpected error: " .. tostring(err))
+    pcall(function() self.updater:cancel() end)
+    self.updateDone = false
+    self.quitIn = nil
+    local msg = tostring(err):gsub("^.-:%d+: ", ""):sub(1, 90)
+    self.menu:showDialog({
+        title = "Update problem",
+        lines = { "Something went wrong while checking.", msg },
+        buttons = { { label = "OK" } },
+    })
+end
+
 function Game:checkForUpdates()
     if self.updater.busy then return end
-    self.updater:check()
-    self.menu:showDialog({
-        title = "Checking for updates",
-        lines = { "Installed: v" .. Updater.localVersion(), "Contacting GitHub..." },
-        buttons = { { label = "Cancel", action = function() self.updater:cancel() end } },
-        cancel = function() self.updater:cancel() end,
-    })
+    local ok, err = pcall(function()
+        self.updater:check()
+        self.menu:showDialog({
+            title = "Checking for updates",
+            lines = { "Installed: v" .. Updater.localVersion(), "Contacting GitHub..." },
+            buttons = { { label = "Cancel", action = function() self.updater:cancel() end } },
+            cancel = function() self.updater:cancel() end,
+        })
+    end)
+    if not ok then updaterProblem(self, err) end
 end
 
 local function updateFailed(self, message)
@@ -686,8 +702,11 @@ function Game:onUpdateEvent(e)
 end
 
 function Game:updateUpdater(dt)
-    local e = self.updater:poll()
-    if e then self:onUpdateEvent(e) end
+    local ok, err = pcall(function()
+        local e = self.updater:poll()
+        if e then self:onUpdateEvent(e) end
+    end)
+    if not ok then updaterProblem(self, err) end
     if self.quitIn then
         self.quitIn = self.quitIn - dt
         local d = self.menu.dialog
@@ -711,7 +730,7 @@ function Game:topShouldAnimate()
     if self.settings.topAnimation == "off" then return false end
     if not self.background:isAnimated() then return false end
     if self.anim:isBusy() or self.controls.dragging or self.solitaire.finishing then return false end
-    return true
+    return self.background:animationFps() or false      -- the most pictures a second to send
 end
 
 function Game:applyBrightness()

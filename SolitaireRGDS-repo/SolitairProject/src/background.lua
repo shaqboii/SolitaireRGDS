@@ -15,10 +15,6 @@ function Background.new(width, height)
     self.frameTimer = 0
     self.fps = 20
 
-    -- Procedural ambient particles (Wallpaper Engine aesthetic)
-    self.particles = {}
-    self:initParticles(35)
-
     self.entries = {}
     self.selectedName = "builtin"
     self:refresh()
@@ -26,34 +22,9 @@ function Background.new(width, height)
     return self
 end
 
-function Background:initParticles(count)
-    local colors = {
-        {"♥", {0.85, 0.2, 0.25, 0.35}},
-        {"♦", {0.9, 0.35, 0.15, 0.35}},
-        {"♣", {0.3, 0.45, 0.7, 0.35}},
-        {"♠", {0.45, 0.35, 0.75, 0.35}}
-    }
-
-    for i = 1, count do
-        local pick = colors[love.math.random(#colors)]
-        table.insert(self.particles, {
-            symbol = pick[1],
-            color = pick[2],
-            x = love.math.random(0, self.width),
-            y = love.math.random(0, self.height),
-            vx = (love.math.random() - 0.5) * 20,
-            vy = -love.math.random(15, 45),
-            size = love.math.random(18, 48),
-            rotation = love.math.random() * math.pi * 2,
-            vRot = (love.math.random() - 0.5) * 1.5,
-            alpha = love.math.random(25, 60) / 100
-        })
-    end
-end
-
 -- Scan assets/backgrounds for pictures the player can choose from
 function Background:refresh()
-    self.entries = { { name = "builtin", label = "Built-in scene", kind = "procedural" } }
+    self.entries = { { name = "builtin", label = "Frutiger Aurora", kind = "procedural" } }
     for _, e in ipairs(Library.list("backgrounds", { "png", "jpg", "jpeg" })) do
         self.entries[#self.entries + 1] = { name = e.name, label = e.label, kind = "image", entry = e }
     end
@@ -135,6 +106,187 @@ function Background:isAnimated()
     return #self.customFrames == 0 and self.customImage == nil
 end
 
+-- ---------------------------------------------------------------------------------------------
+-- Built-in scene: "Frutiger Aurora" (glossy sky, drifting aurora ribbons, bubbles, soft hills).
+-- Built once into pictures/meshes; each frame only draws a few big shapes, so it is cheap.
+-- ---------------------------------------------------------------------------------------------
+
+-- small repeatable random numbers (the scene looks the same every launch)
+local function lcg(seed)
+    local state = seed
+    return function()
+        state = (state * 1103515245 + 12345) % 2147483648
+        return state / 2147483648
+    end
+end
+
+local function verticalGradient(w, h, stops)
+    local verts = {}
+    for _, st in ipairs(stops) do
+        local y = st[1] * h
+        verts[#verts + 1] = { 0, y, 0, 0, st[2], st[3], st[4], 1 }
+        verts[#verts + 1] = { w, y, 0, 0, st[2], st[3], st[4], 1 }
+    end
+    return love.graphics.newMesh(verts, "strip", "static")
+end
+
+-- a hill: a strip from a wavy crest down to the bottom edge
+local function hill(w, h, baseY, amp, f1, f2, phase, crest, foot)
+    local verts = {}
+    local n = 32
+    for i = 0, n do
+        local x = i * w / n
+        local y = baseY + amp * math.sin(i / n * f1 + phase) + amp * 0.4 * math.sin(i / n * f2 + phase * 2)
+        verts[#verts + 1] = { x, y, 0, 0, crest[1], crest[2], crest[3], 1 }
+        verts[#verts + 1] = { x, h, 0, 0, foot[1], foot[2], foot[3], 1 }
+    end
+    return love.graphics.newMesh(verts, "strip", "static")
+end
+
+-- one soft aurora ribbon: bright in the middle, fading to nothing at the top and bottom
+local function ribbon(w, yBase, amp, halfWidth, phase, color, alpha)
+    local verts = {}
+    local n = 36
+    local function point(i)
+        local t = i / n
+        local x = t * w
+        local yc = yBase + amp * math.sin(t * 5.2 + phase) + amp * 0.5 * math.sin(t * 11 + phase * 1.7)
+        local hw = halfWidth * (0.75 + 0.25 * math.sin(t * 7 + phase * 0.6))
+        return x, yc, hw
+    end
+    for i = 0, n - 1 do
+        local x1, y1, h1 = point(i)
+        local x2, y2, h2 = point(i + 1)
+        local c, a = color, alpha
+        local function v(x, y, al) return { x, y, 0, 0, c[1], c[2], c[3], al } end
+        -- upper half
+        verts[#verts + 1] = v(x1, y1 - h1, 0); verts[#verts + 1] = v(x2, y2 - h2, 0); verts[#verts + 1] = v(x1, y1, a)
+        verts[#verts + 1] = v(x2, y2 - h2, 0); verts[#verts + 1] = v(x2, y2, a);      verts[#verts + 1] = v(x1, y1, a)
+        -- lower half
+        verts[#verts + 1] = v(x1, y1, a);      verts[#verts + 1] = v(x2, y2, a);      verts[#verts + 1] = v(x1, y1 + h1, 0)
+        verts[#verts + 1] = v(x2, y2, a);      verts[#verts + 1] = v(x2, y2 + h2, 0); verts[#verts + 1] = v(x1, y1 + h1, 0)
+    end
+    return love.graphics.newMesh(verts, "triangles", "static")
+end
+
+function Background:buildAurora()
+    local W, H = self.width, self.height
+    local rnd = lcg(2007)
+    local scene = {}
+
+    -- the still part (sky, sun rays, clouds, bubbles, hills) is drawn once into a picture
+    local base = love.graphics.newCanvas(W, H)
+    local prev = love.graphics.getCanvas()
+    love.graphics.setCanvas(base)
+    love.graphics.clear(0, 0, 0, 1)
+    love.graphics.setBlendMode("alpha")
+
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(verticalGradient(W, H, {
+        { 0.00, 0.10, 0.45, 0.85 },     -- deep sky blue
+        { 0.40, 0.30, 0.72, 0.95 },
+        { 0.66, 0.62, 0.92, 0.95 },     -- pale aqua
+        { 0.82, 0.80, 0.97, 0.70 },     -- lime glow at the horizon
+        { 1.00, 0.55, 0.90, 0.55 },
+    }))
+
+    -- soft light rays from the top left
+    for i = 1, 6 do
+        local a0 = 0.10 + i * 0.13
+        love.graphics.setColor(1, 1, 1, 0.05 + 0.02 * (i % 2))
+        love.graphics.polygon("fill", W * 0.05, -20, W * (a0 - 0.05), H, W * (a0 + 0.04), H)
+    end
+
+    -- clouds: stacked translucent circles give soft edges
+    for c = 1, 7 do
+        local cx, cy = rnd() * W, 120 + rnd() * 300
+        local size = 40 + rnd() * 50
+        for puff = 1, 6 do
+            local px = cx + (puff - 3.5) * size * 0.8
+            local py = cy + math.sin(puff * 1.7) * size * 0.25
+            local r = size * (0.7 + 0.5 * math.sin(puff * 2.1) ^ 2)
+            for layer = 1, 3 do
+                love.graphics.setColor(1, 1, 1, 0.10)
+                love.graphics.circle("fill", px, py, r * (1.35 - layer * 0.25))
+            end
+        end
+    end
+
+    -- glossy bubbles
+    for _ = 1, 22 do
+        local bx, by = rnd() * W, 60 + rnd() * 560
+        local br = 12 + rnd() * rnd() * 70
+        love.graphics.setColor(1, 1, 1, 0.07)
+        love.graphics.circle("fill", bx, by, br)
+        love.graphics.setColor(1, 1, 1, 0.45)
+        love.graphics.setLineWidth(2)
+        love.graphics.circle("line", bx, by, br)
+        love.graphics.setColor(1, 1, 1, 0.55)
+        love.graphics.ellipse("fill", bx - br * 0.35, by - br * 0.4, br * 0.28, br * 0.16)
+    end
+
+    -- rolling hills at the bottom
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(hill(W, H, H * 0.86, 26, 5.0, 9.0, 0.6, { 0.45, 0.85, 0.55 }, { 0.20, 0.62, 0.40 }))
+    love.graphics.draw(hill(W, H, H * 0.92, 20, 4.0, 8.0, 2.4, { 0.32, 0.75, 0.42 }, { 0.12, 0.50, 0.32 }))
+
+    love.graphics.setCanvas(prev)
+    scene.base = base
+
+    -- two sets of aurora ribbons; the picture fades between them to make the light drift
+    local colors = {
+        { 0.25, 1.00, 0.85 },   -- teal
+        { 0.60, 1.00, 0.55 },   -- green
+        { 0.40, 0.70, 1.00 },   -- blue
+        { 0.80, 0.65, 1.00 },   -- violet
+    }
+    scene.layers = {}
+    for layer = 1, 2 do
+        local meshes = {}
+        for i, col in ipairs(colors) do
+            local phase = (i * 1.3) + (layer - 1) * 2.4
+            meshes[i] = ribbon(W, 110 + i * 62, 34 + i * 6, 70 + i * 8, phase, col, 0.34)
+        end
+        scene.layers[layer] = meshes
+    end
+    self.scene = scene
+end
+
+-- draws the Frutiger Aurora scene; falls back to a plain gradient if the pieces can't be built
+function Background:drawAurora()
+    if not self.scene and not self.sceneFailed then
+        local ok, err = pcall(self.buildAurora, self)
+        if not ok then
+            self.sceneFailed = true
+            print("Background: aurora scene failed, using a plain gradient: " .. tostring(err))
+        end
+    end
+    if not self.scene then
+        love.graphics.setColor(0.25, 0.65, 0.9, 1)
+        love.graphics.rectangle("fill", 0, 0, self.width, self.height)
+        return
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(self.scene.base, 0, 0)
+
+    -- slow breathing between the two ribbon sets
+    local k = 0.5 + 0.5 * math.sin(self.time * 0.45)
+    love.graphics.setBlendMode("add")
+    for layer = 1, 2 do
+        local alpha = (layer == 1) and (1 - k) or k
+        love.graphics.setColor(1, 1, 1, 0.25 + 0.75 * alpha)
+        for _, m in ipairs(self.scene.layers[layer]) do love.graphics.draw(m) end
+    end
+    love.graphics.setBlendMode("alpha")
+end
+
+-- How many pictures a second the top screen should be sent (nil = it doesn't move)
+function Background:animationFps()
+    if #self.customFrames > 1 then return math.min(self.fps, 12) end
+    if #self.customFrames == 0 and self.customImage == nil then return 8 end
+    return nil
+end
+
 function Background:update(dt)
     self.time = self.time + dt
 
@@ -145,33 +297,6 @@ function Background:update(dt)
             self.currentFrame = (self.currentFrame % #self.customFrames) + 1
         end
     end
-
-    for _, p in ipairs(self.particles) do
-        p.x = p.x + p.vx * dt
-        p.y = p.y + p.vy * dt
-        p.rotation = p.rotation + p.vRot * dt
-
-        if p.y < -50 then
-            p.y = self.height + 40
-            p.x = love.math.random(0, self.width)
-        elseif p.y > self.height + 50 then
-            p.y = -40
-        end
-
-        if p.x < -50 then p.x = self.width + 40 end
-        if p.x > self.width + 50 then p.x = -40 end
-    end
-end
-
--- Cache fonts by size (the old code created a new font for every particle on every frame)
-function Background:getFont(size)
-    self.fontCache = self.fontCache or {}
-    local f = self.fontCache[size]
-    if not f then
-        f = love.graphics.newFont(size)
-        self.fontCache[size] = f
-    end
-    return f
 end
 
 -- topMode = true when this is drawn onto the dedicated top screen (not the single-screen wallpaper view)
@@ -187,43 +312,23 @@ function Background:draw(solitaire, fontTitle, fontMedium, fontSmall, topMode, i
         love.graphics.setColor(1, 1, 1, 1)
         drawCover(self.customImage, self.width, self.height)
     else
-        local steps = 32
-        local hStep = self.height / steps
-        for i = 0, steps do
-            local t = i / steps
-            local wave = math.sin(self.time * 0.8 + t * 4) * 0.05
-            local r = 0.04 + 0.03 * math.sin(self.time * 0.5 + t * 2)
-            local g = 0.12 + 0.08 * math.sin(self.time * 0.4 + t * 3 + 1) + wave
-            local b = 0.22 + 0.15 * math.cos(self.time * 0.6 + t * 2)
-            love.graphics.setColor(r, g, b, 1)
-            love.graphics.rectangle("fill", 0, i * hStep, self.width, hStep + 1)
-        end
-
-        for _, p in ipairs(self.particles) do
-            local pulse = math.sin(self.time * 2 + p.x) * 0.15
-            love.graphics.setColor(p.color[1], p.color[2], p.color[3], math.max(0.1, p.alpha + pulse))
-            local pFont = self:getFont(p.size)
-            love.graphics.setFont(pFont)
-            local sw = pFont:getWidth(p.symbol)
-            local sh = pFont:getHeight()
-            love.graphics.print(p.symbol, p.x, p.y, p.rotation, 1, 1, sw / 2, sh / 2)
-        end
+        self:drawAurora()
 
         love.graphics.setFont(fontTitle)
         local titleText = "KLONDIKE SOLITAIRE"
         local tw = fontTitle:getWidth(titleText)
         local titleY = 100
 
-        love.graphics.setColor(0, 0, 0, 0.7)
-        love.graphics.print(titleText, (self.width - tw) / 2 + 2, titleY + 2)
+        love.graphics.setColor(0.0, 0.25, 0.4, 0.45)
+        love.graphics.print(titleText, (self.width - tw) / 2 + 2, titleY + 3)
 
-        love.graphics.setColor(0.95, 0.82, 0.35, 1)
+        love.graphics.setColor(1, 1, 1, 1)
         love.graphics.print(titleText, (self.width - tw) / 2, titleY)
 
         love.graphics.setFont(fontSmall)
         local sub = "ANBERNIC RG DS PLUS • BANANA OS"
         local sw = fontSmall:getWidth(sub)
-        love.graphics.setColor(0.8, 0.85, 0.95, 0.8)
+        love.graphics.setColor(0.9, 1, 1, 0.95)
         love.graphics.print(sub, (self.width - sw) / 2, titleY + 54)
     end
 
@@ -233,9 +338,18 @@ function Background:draw(solitaire, fontTitle, fontMedium, fontSmall, topMode, i
     local panelX = (self.width - panelW) / 2
     local panelY = 460
 
-    love.graphics.setColor(0.05, 0.08, 0.14, 0.75)
+    local aurora = (#self.customFrames == 0 and self.customImage == nil)
+    if aurora then
+        love.graphics.setColor(0.04, 0.22, 0.38, 0.55)        -- frosted glass
+    else
+        love.graphics.setColor(0.05, 0.08, 0.14, 0.75)
+    end
     love.graphics.rectangle("fill", panelX, panelY, panelW, panelH, 16, 16)
-    love.graphics.setColor(0.35, 0.55, 0.85, 0.6)
+    if aurora then
+        love.graphics.setColor(0.85, 1, 1, 0.75)
+    else
+        love.graphics.setColor(0.35, 0.55, 0.85, 0.6)
+    end
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", panelX, panelY, panelW, panelH, 16, 16)
 
