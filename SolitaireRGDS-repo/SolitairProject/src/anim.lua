@@ -57,6 +57,11 @@ function Anim:position(id, lx, ly)
     local a = self.cards[id]
     if not a then return lx, ly, false end
     local p = (self.t - a.start) / a.dur
+    if a.shake then
+        if p <= 0 or p >= 1 then return lx, ly, true end
+        local amp = (a.amp or 9) * (1 - p)
+        return lx + math.sin(p * math.pi * 6) * amp, ly, true
+    end
     if p <= 0 then return a.fx, a.fy, true end
     if p >= 1 then return lx, ly, false end
     local e = a.ease(p)
@@ -75,6 +80,13 @@ function Anim:add(id, fx, fy, opts)
         ease = (opts.ease == "out") and easeOut or easeInOut,
         back = opts.back or false,
     }
+end
+
+-- Shake a card left-right in place (failed move)
+function Anim:shake(id, delay, dur, amp)
+    self.seq = self.seq + 1
+    self.cards[id] = { fx = 0, fy = 0, start = self.t + (delay or 0), dur = dur or 0.32,
+        seq = self.seq, ease = easeOut, back = false, shake = true, amp = amp }
 end
 
 -- Compare "before" and "after" positions (tables id -> number) and fly every card that moved.

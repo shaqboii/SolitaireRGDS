@@ -1,3 +1,4 @@
+local Ui = require("src.ui")
 -- Menu: the pause menu and every pop-up box (confirmations, hints, "winnable?", victory).
 --
 -- It is drawn on the table screen (bottom) and works with the D-pad and with touch.
@@ -226,8 +227,11 @@ function Menu:items()
             { label = "Brightness", kind = "choice", desc = "Screen brightness, in 5% steps",
               value = function() return percent(g.settings.brightness or 1) end,
               change = function(dir) g:changeBrightness(dir) end },
+            { label = "Detect lost games", kind = "choice", desc = "Quietly checks if the deal can still be won",
+              value = function() return (g.settings.autoDetect == "off") and "Off" or "On" end,
+              change = function() g:toggleAutoDetect() end },
             { label = "Background", kind = "choice", desc = "Pictures go in SolitairProject/assets/backgrounds",
-              value = function() return g.background.selectedLabel or "Built-in scene" end,
+              value = function() return g.background.selectedLabel or "XMB Purple" end,
               change = function(dir) g:changeBackground(dir) end },
             { label = "Back", kind = "action", desc = "", run = function() self:back() end },
         }
@@ -353,9 +357,9 @@ function Menu:panelRect()
         w = 780
         h = 100 + #CONTROL_LINES * 28 + 70
     elseif self.screen == "stats" then
-        h = 100 + #Stats.rows(self.game.stats) * 32 + n * 54 + 30
+        h = 100 + #Stats.rows(self.game.stats) * 32 + n * 58 + 30
     else
-        h = 100 + n * 54 + 24
+        h = 100 + n * 58 + 24
     end
     return { x = (1024 - w) / 2, y = math.floor((768 - h) / 2), w = w, h = h }
 end
@@ -373,7 +377,7 @@ end
 
 function Menu:itemRect(i)
     local p = self:panelRect()
-    return { x = p.x + 20, y = self:listTop() + (i - 1) * 54, w = p.w - 40, h = 48 }
+    return { x = p.x + 20, y = self:listTop() + (i - 1) * 58, w = p.w - 40, h = 46 }
 end
 
 function Menu:dialogMetrics()
@@ -387,7 +391,7 @@ end
 function Menu:dialogButtonRects()
     local m = self:dialogMetrics()
     local n = #self.dialog.buttons
-    local gap = 12
+    local gap = 18
     local bw = math.min(190, (m.w - 40 - gap * (n - 1)) / n)
     local total = bw * n + gap * (n - 1)
     local x0 = m.x + (m.w - total) / 2
@@ -424,36 +428,26 @@ function Menu:draw(r)
     end
 
     local p = self:panelRect()
-    love.graphics.setColor(0.07, 0.09, 0.15, 0.97)
-    love.graphics.rectangle("fill", p.x, p.y, p.w, p.h, 16, 16)
-    love.graphics.setColor(0.4, 0.6, 0.9, 0.9)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", p.x, p.y, p.w, p.h, 16, 16)
+    Ui.panel(p.x, p.y, p.w, p.h)
 
     local titles = { main = self.title and "SOLITAIRE" or "PAUSED", options = "OPTIONS", controls = "CONTROLS", stats = "ALL-TIME STATS" }
     local title = titles[self.screen] or ""
-    love.graphics.setFont(r.fontTitle)
-    love.graphics.setColor(1, 0.92, 0.45, 1)
-    love.graphics.print(title, p.x + (p.w - r.fontTitle:getWidth(title)) / 2, p.y + 22)
+    Ui.centered(r.fontTitle, title, p.x + p.w / 2, p.y + 18, Ui.colors.gold, Ui.colors.ink, 3)
 
     -- content above the item list
     if self.screen == "controls" then
         love.graphics.setFont(r.fontButton)
         for i, line in ipairs(CONTROL_LINES) do
             local y = p.y + 84 + (i - 1) * 28
-            love.graphics.setColor(0.55, 0.85, 1, 1)
-            love.graphics.print(line[1], p.x + 30, y)
-            love.graphics.setColor(0.9, 0.93, 1, 1)
-            love.graphics.print(line[2], p.x + 270, y)
+            Ui.text(r.fontButton, line[1], p.x + 30, y, { 1, 0.92, 0.35 }, Ui.colors.ink, 1)
+            Ui.text(r.fontButton, line[2], p.x + 270, y, { 1, 1, 1 }, Ui.colors.ink, 1)
         end
     elseif self.screen == "stats" then
         love.graphics.setFont(r.fontButton)
         for i, row in ipairs(Stats.rows(self.game.stats)) do
             local y = p.y + 84 + (i - 1) * 32
-            love.graphics.setColor(0.8, 0.85, 0.95, 1)
-            love.graphics.print(row[1], p.x + 40, y)
-            love.graphics.setColor(1, 0.92, 0.5, 1)
-            love.graphics.print(row[2], p.x + p.w - 40 - r.fontButton:getWidth(row[2]), y)
+            Ui.text(r.fontButton, row[1], p.x + 40, y, { 1, 1, 1 }, Ui.colors.ink, 1)
+            Ui.text(r.fontButton, row[2], p.x + p.w - 40 - r.fontButton:getWidth(row[2]), y, { 1, 0.92, 0.35 }, Ui.colors.ink, 1)
         end
     end
 
@@ -462,48 +456,34 @@ function Menu:draw(r)
     for i, item in ipairs(items) do
         local rc = self:itemRect(i)
         local selected = (i == self.index)
-        if selected then
-            love.graphics.setColor(0.2, 0.36, 0.62, 0.9)
-            love.graphics.rectangle("fill", rc.x, rc.y, rc.w, rc.h, 10, 10)
-            love.graphics.setColor(0.6, 0.8, 1, 0.9)
-            love.graphics.setLineWidth(2)
-            love.graphics.rectangle("line", rc.x, rc.y, rc.w, rc.h, 10, 10)
-        else
-            love.graphics.setColor(1, 1, 1, 0.06)
-            love.graphics.rectangle("fill", rc.x, rc.y, rc.w, rc.h, 10, 10)
-        end
-
-        love.graphics.setFont(r.fontMedium)
-        love.graphics.setColor(1, 1, 1, 1)
+        Ui.button(rc.x, rc.y, rc.w, rc.h, selected, selected and (0.5 + 0.5 * math.sin(self.time * 5)) or nil)
+        local txt = selected and { 1, 1, 1 } or { 1, 1, 1 }
+        local ink = selected and { 0.62, 0.30, 0.02 } or Ui.colors.ink
         if item.kind == "choice" then
-            love.graphics.print(item.label, rc.x + 20, rc.y + 12)
+            Ui.text(r.fontMedium, item.label, rc.x + 20, rc.y + 12, txt, ink, 2)
             local left = rc.x + rc.w - 330
             local right = rc.x + rc.w - 60
-            love.graphics.setColor(selected and 1 or 0.7, selected and 0.9 or 0.75, selected and 0.4 or 0.85, 1)
+            love.graphics.setColor(1, 1, 1, 1)
             triangle(left + 12, rc.y + rc.h / 2, 9, -1)
             triangle(right + 22, rc.y + rc.h / 2, 9, 1)
             local val = item.value()
-            love.graphics.setFont(r.fontButton)
-            love.graphics.setColor(1, 0.95, 0.7, 1)
             local maxW = right - left - 50
             if r.fontButton:getWidth(val) > maxW then
                 -- shorten long names so they stay between the arrows
                 while #val > 3 and r.fontButton:getWidth(val .. "...") > maxW do val = val:sub(1, -2) end
                 val = val .. "..."
             end
-            love.graphics.print(val, left + 50 + (maxW - r.fontButton:getWidth(val)) / 2, rc.y + 14)
+            Ui.text(r.fontButton, val, left + 50 + (maxW - r.fontButton:getWidth(val)) / 2, rc.y + 14, { 1, 1, 0.8 }, ink, 2)
         else
-            love.graphics.print(item.label, rc.x + (rc.w - r.fontMedium:getWidth(item.label)) / 2, rc.y + 12)
+            Ui.text(r.fontMedium, item.label, rc.x + (rc.w - r.fontMedium:getWidth(item.label)) / 2, rc.y + 12, txt, ink, 2)
         end
     end
 
     -- one-line description of the highlighted item, under the box
     local cur = items[self.index]
     if cur and cur.desc and cur.desc ~= "" then
-        love.graphics.setFont(r.fontSmall)
-        love.graphics.setColor(0.85, 0.92, 1, 0.9)
         local w = r.fontSmall:getWidth(cur.desc)
-        love.graphics.print(cur.desc, (r.width - w) / 2, math.min(p.y + p.h + 12, r.height - 30))
+        Ui.text(r.fontSmall, cur.desc, (r.width - w) / 2, math.min(p.y + p.h + 16, r.height - 30), { 1, 1, 1 }, Ui.colors.ink, 2)
     end
 end
 
@@ -511,38 +491,20 @@ function Menu:drawDialog(r)
     local d = self.dialog
     local m = self:dialogMetrics()
 
-    love.graphics.setColor(0.07, 0.09, 0.15, 0.97)
-    love.graphics.rectangle("fill", m.x, m.y, m.w, m.h, 16, 16)
-    love.graphics.setColor(d.accent and d.accent[1] or 0.4, d.accent and d.accent[2] or 0.6, d.accent and d.accent[3] or 0.9, 0.95)
-    love.graphics.setLineWidth(3)
-    love.graphics.rectangle("line", m.x, m.y, m.w, m.h, 16, 16)
+    Ui.panel(m.x, m.y, m.w, m.h)
+    Ui.centered(r.fontTitle, d.title, m.x + m.w / 2, m.y + 16, d.accent and { d.accent[1], d.accent[2], d.accent[3] } or Ui.colors.gold, Ui.colors.ink, 3)
 
-    love.graphics.setFont(r.fontTitle)
-    love.graphics.setColor(1, 0.92, 0.45, 1)
-    love.graphics.print(d.title, m.x + (m.w - r.fontTitle:getWidth(d.title)) / 2, m.y + 20)
-
-    love.graphics.setFont(r.fontButton)
     for i, line in ipairs(d.lines or {}) do
-        love.graphics.setColor(0.9, 0.93, 1, 1)
-        love.graphics.print(line, m.x + (m.w - r.fontButton:getWidth(line)) / 2, m.y + 74 + (i - 1) * 30)
+        Ui.centered(r.fontButton, line, m.x + m.w / 2, m.y + 74 + (i - 1) * 30, { 1, 1, 1 }, Ui.colors.ink, 2)
     end
 
     local rects = self:dialogButtonRects()
     for i, b in ipairs(d.buttons) do
         local rc = rects[i]
         local selected = (i == self.index)
-        if selected then
-            love.graphics.setColor(0.2, 0.4, 0.7, 0.95)
-        else
-            love.graphics.setColor(0.15, 0.2, 0.3, 0.95)
-        end
-        love.graphics.rectangle("fill", rc.x, rc.y, rc.w, rc.h, 10, 10)
-        love.graphics.setColor(selected and 0.7 or 0.45, selected and 0.85 or 0.6, 1, 0.9)
-        love.graphics.setLineWidth(selected and 3 or 2)
-        love.graphics.rectangle("line", rc.x, rc.y, rc.w, rc.h, 10, 10)
-        love.graphics.setFont(r.fontButton)
-        love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.print(b.label, rc.x + (rc.w - r.fontButton:getWidth(b.label)) / 2, rc.y + (rc.h - r.fontButton:getHeight()) / 2)
+        Ui.button(rc.x, rc.y, rc.w, rc.h, selected, selected and (0.5 + 0.5 * math.sin(self.time * 5)) or nil)
+        local ink = selected and { 0.62, 0.30, 0.02 } or Ui.colors.ink
+        Ui.centered(r.fontButton, b.label, rc.x + rc.w / 2, rc.y + (rc.h - r.fontButton:getHeight()) / 2, { 1, 1, 1 }, ink, 2)
     end
 end
 

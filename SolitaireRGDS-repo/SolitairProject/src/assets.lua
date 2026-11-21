@@ -233,19 +233,52 @@ function Assets:loadAudio()
             end
         end
     end
+    -- optional extras: a song after the win jingle (win_song.*) and a "no way to win" sound (lose.*)
+    for _, name in ipairs({ "win_song", "lose" }) do
+        for _, ext in ipairs({ ".mp3", ".ogg", ".wav" }) do
+            local entry = found[name .. ext]
+            if entry then
+                local ok, src = pcall(Library.loadSource, entry, name == "win_song" and "stream" or "static")
+                if ok and src then self.audio[name] = src print("Assets: loaded '" .. name .. "' from " .. entry.path) end
+                break
+            end
+        end
+    end
     if not self.audio.win then print("Assets: no win sound found (assets/audio/win.mp3/.ogg/.wav)") end
 end
 
 function Assets:playSound(name)
+    local now = love.timer.getTime()
+    -- the pickup "flip" right after a rejected move must not drown out the error sound
+    if name ~= "error" and self.errorAt and now - self.errorAt < 0.45 and (name == "flip" or name == "place") then return end
+    if name == "error" then self.errorAt = now end
     local src = self.audio[name]
     if not src and name == "undo" then src = self.audio["flip"] end
     if src then
         pcall(function()
-            src:setVolume(self.sfxVolume)
+            src:setVolume(name == "error" and math.max(self.sfxVolume, 0.5) or self.sfxVolume)
             src:stop()
             src:play()
         end)
     end
+end
+
+-- The song that follows the win jingle. Loops until stopped. Returns true if there is one.
+function Assets:playWinSong()
+    local src = self.audio.win_song
+    if not src then return false end
+    pcall(function()
+        src:setLooping(true)
+        src:setVolume(self.musicVolume)
+        src:stop()
+        src:play()
+    end)
+    return true
+end
+
+function Assets:stopWinSong()
+    local src = self.audio.win_song
+    if src then pcall(function() src:stop() end) end
 end
 
 function Assets:stopSound(name)

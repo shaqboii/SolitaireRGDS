@@ -10,9 +10,10 @@ local DEFAULTS = {
     sfxVolume = 1.0,
     background = "auto",     -- "auto" or a picture's file name
     brightness = 1.0,        -- 0.05 .. 1.0 in steps of 0.05
+    autoDetect = "on",       -- "on"/"off": quietly check whether the deal can still be won
     topAnimation = "on",     -- "on" or "off": the top-screen wallpaper keeps moving
 }
-local KEYS = { "music", "musicVolume", "sfxVolume", "background", "brightness", "topAnimation" }
+local KEYS = { "music", "musicVolume", "sfxVolume", "background", "brightness", "topAnimation", "autoDetect" }
 
 function Settings.load()
     return Store.load(FILE, DEFAULTS)

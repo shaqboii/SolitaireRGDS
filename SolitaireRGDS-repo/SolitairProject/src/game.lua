@@ -102,7 +102,15 @@ function Game:act(fn, sound, opts)
 end
 
 -- A card was dropped / placed somewhere it doesn't belong: error sound (assets/audio/error.mp3) and a short hint
-function Game:reject()
+function Game:reject(delay)
+    local sel = self.solitaire.selection
+    if sel then
+        local s = self.solitaire
+        local pile = (sel.source == "tableau" and s.tableau[sel.col]) or (sel.source == "foundation" and s.foundations[sel.col]) or s.waste
+        for i = sel.cardIndex or #pile, #pile do
+            if pile[i] then self.anim:shake(pile[i].id, delay or 0) end
+        end
+    end
     local now = love.timer.getTime()
     if now - (self.lastReject or -1) < 0.25 then return end     -- no machine-gun errors
     self.lastReject = now
@@ -152,6 +160,11 @@ function Game:afterDeal(skipAnimation)
     self.cursor.tableauCol = 1
     self.cursor.cardIndex = 1
 
+    self.winSongTimer = nil
+    self.assets:stopWinSong()
+    self.unwinnablePrompted = false
+    self.checkedVersion = nil
+    self.autoCheck = nil
     if self.musicPausedForWin then
         self.musicPausedForWin = false
         self.assets:stopSound("win")
@@ -531,6 +544,9 @@ function Game:onWin()
     self.assets:pauseMusic()
     self.musicPausedForWin = true
     self.assets:playSound("win")
+    if self.assets.audio.win_song then
+        self.winSongTimer = (self.assets:soundLength("win") or 2.5) + 0.3
+    end
     self.winDialogDelay = 1.0
 end
 
@@ -546,6 +562,58 @@ function Game:showVictory()
         buttons = {
             { label = "New game", action = function() self:newGame() end },
             { label = "Menu", action = function() self.menu:openMain() end },
+        },
+    })
+end
+
+-- Quietly checks, while the player is idle, whether the game can still be won.
+-- Small budget (a few ms per frame, at most ~4 s of CPU, 400k positions), runs only when nothing else is going on.
+-- Asks once per deal. "Can't tell" results are ignored.
+function Game:updateAutoCheck(dt)
+    local s = self.solitaire
+    local busy = self.menu.open or self.task or self.anim:isBusy() or self.anim:isDealing()
+        or s.isWon or self.winHandled or s.finishing or self.controls.dragging
+    if busy or self.unwinnablePrompted then
+        self.autoCheck = nil
+        self.idleFor = 0
+        return
+    end
+    if self.settings.autoDetect == "off" then return end
+    if self.lastIdleVersion ~= s.version then
+        self.lastIdleVersion = s.version
+        self.idleFor = 0
+        self.autoCheck = nil
+        return
+    end
+    self.idleFor = (self.idleFor or 0) + dt
+    if self.idleFor < 1.2 or self.checkedVersion == s.version then return end
+    if not self.autoCheck then
+        local solver = Solver.new(s)
+        solver.maxNodes, solver.maxSeconds = 400000, 4
+        self.autoCheck = { solver = solver, version = s.version }
+    end
+    local res = self.autoCheck.solver:step(0.004)
+    if res then
+        local ac = self.autoCheck
+        self.autoCheck = nil
+        self.checkedVersion = ac.version
+        if ac.version == s.version then
+            self.cache = { version = ac.version, result = res, solver = ac.solver }
+            if res == "lose" then self:onUnwinnable() end
+        end
+    end
+end
+
+function Game:onUnwinnable()
+    self.unwinnablePrompted = true
+    if self.assets.audio.lose then self.assets:playSound("lose") else self.assets:playSound("error") end
+    self.menu:showDialog({
+        title = "No way to win", accent = { 1, 0.55, 0.45 },
+        lines = { "This deal can't be won anymore.", "Start a new deck, or quit the game?" },
+        buttons = {
+            { label = "New deck", action = function() self:newGame() end },
+            { label = "Quit game", action = function() Savegame.clear() love.event.quit() end },
+            { label = "Keep playing" },
         },
     })
 end
@@ -587,6 +655,11 @@ function Game:changeSfxVolume(dir)
     self.assets:playSound("flip")
 end
 
+function Game:toggleAutoDetect()
+    self.settings.autoDetect = (self.settings.autoDetect == "off") and "on" or "off"
+    self.autoCheck = nil
+    Settings.save(self.settings)
+end
 function Game:changeBackground(dir)
     local name = self.background:cycle(dir)
     self.settings.background = name
@@ -798,7 +871,16 @@ function Game:update(dt)
     self.renderer:update(dt, self)
     self.menu:update(dt)
 
+    if self.winSongTimer then
+        self.winSongTimer = self.winSongTimer - dt
+        if self.winSongTimer <= 0 then
+            self.winSongTimer = nil
+            self.assets:playWinSong()
+        end
+    end
+
     self:updateTask(dt)
+    self:updateAutoCheck(dt)
     self:updateFinish(dt)
     self:updateWin(dt)
 

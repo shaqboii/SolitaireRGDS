@@ -1,3 +1,5 @@
+local Fonts = require("src.fonts")
+local Ui = require("src.ui")
 local Renderer = {}
 Renderer.__index = Renderer
 
@@ -25,11 +27,11 @@ function Renderer.new(assets, background)
     self.dualMode = false
 
     -- Fonts
-    self.fontTitle = love.graphics.newFont(36)
-    self.fontMedium = love.graphics.newFont(22)
-    self.fontSmall = love.graphics.newFont(16)
-    self.fontButton = love.graphics.newFont(18)
-    self.fontHud = love.graphics.newFont(17)
+    self.fontTitle = Fonts.get(36)
+    self.fontMedium = Fonts.get(22)
+    self.fontSmall = Fonts.get(16)
+    self.fontButton = Fonts.get(18)
+    self.fontHud = Fonts.get(17)
 
     -- Card dimensions & layout positions
     self.cardW = 116
@@ -273,17 +275,13 @@ function Renderer:drawButton(id, label, state)
     local lift = 0
     if state.pulse then lift = heartbeat(self.time) end
 
-    love.graphics.setColor(accent[1] * 0.35 + flash * 0.4, accent[2] * 0.35 + flash * 0.4, accent[3] * 0.35 + flash * 0.4, 0.88 * a)
-    love.graphics.rectangle("fill", b.x - lift * 3, b.y - lift * 3, b.w + lift * 6, b.h + lift * 6, 8, 8)
-    love.graphics.setColor(accent[1], accent[2], accent[3], 0.85 * a)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", b.x - lift * 3, b.y - lift * 3, b.w + lift * 6, b.h + lift * 6, 8, 8)
+    local function shade(k) return { math.min(1, accent[1] * k + flash * 0.4), math.min(1, accent[2] * k + flash * 0.4), math.min(1, accent[3] * k + flash * 0.4) } end
+    Ui.box(b.x - lift * 3, b.y - lift * 3, b.w + lift * 6, b.h + lift * 6, shade(1.0), shade(0.55), { border = 3, radius = 14, alpha = a })
 
     local font = state.font or self.fontButton
-    love.graphics.setFont(font)
-    love.graphics.setColor(0.96, 0.97, 1, a)
     local tw = font:getWidth(label)
-    love.graphics.print(label, b.x + (b.w - tw) / 2, b.y + (b.h - font:getHeight()) / 2)
+    local ink = { accent[1] * 0.25, accent[2] * 0.25, accent[3] * 0.25 }
+    Ui.text(font, label, b.x + (b.w - tw) / 2, b.y + (b.h - font:getHeight()) / 2, { 1, 1, 1, a }, ink, 2)
 end
 
 local function drawArrow(x1, y1, x2, y2)
@@ -514,10 +512,8 @@ function Renderer:draw(game)
             tw = self.fontSmall:getWidth(text)
         end
         local bx = msgX + math.max(0, (maxW - tw) / 2)
-        love.graphics.setColor(0, 0, 0, 0.45 * alpha)
-        love.graphics.rectangle("fill", bx - 12, 722, tw + 24, 36, 10, 10)
-        love.graphics.setColor(1, 0.95, 0.7, alpha)
-        love.graphics.print(text, bx, 729)
+        Ui.box(bx - 14, 720, tw + 28, 38, Ui.colors.yellowTop, Ui.colors.yellowBottom, { border = 3, radius = 14, alpha = alpha })
+        Ui.text((self.fontButton:getWidth(text) > maxW) and self.fontSmall or self.fontButton, text, bx, 729, { 1, 1, 1, alpha }, { 0.62, 0.30, 0.02 }, 2)
     end
 
     -- 12. Solver "thinking" panel
@@ -526,24 +522,15 @@ function Renderer:draw(game)
         love.graphics.rectangle("fill", 0, 0, self.width, self.height)
         local w, h = 420, 150
         local x, y = (self.width - w) / 2, (self.height - h) / 2
-        love.graphics.setColor(0.08, 0.1, 0.16, 0.96)
-        love.graphics.rectangle("fill", x, y, w, h, 14, 14)
-        love.graphics.setColor(0.4, 0.65, 0.9, 0.9)
-        love.graphics.setLineWidth(2)
-        love.graphics.rectangle("line", x, y, w, h, 14, 14)
-        love.graphics.setFont(self.fontMedium)
-        love.graphics.setColor(1, 1, 1, 1)
+        Ui.panel(x, y, w, h)
         local msg = game.task.kind == "winnable" and "Checking the game..." or "Looking for a move..."
-        love.graphics.print(msg, x + (w - self.fontMedium:getWidth(msg)) / 2, y + 28)
+        Ui.centered(self.fontMedium, msg, x + w / 2, y + 24, { 1, 1, 1 }, Ui.colors.ink, 2)
         -- spinner
         local a0 = self.time * 6
-        love.graphics.setColor(0.95, 0.8, 0.3, 1)
-        love.graphics.setLineWidth(5)
+        love.graphics.setColor(1, 0.9, 0.3, 1)
+        love.graphics.setLineWidth(6)
         love.graphics.arc("line", "open", x + w / 2, y + 92, 14, a0, a0 + math.pi * 1.4)
-        love.graphics.setFont(self.fontSmall)
-        love.graphics.setColor(0.8, 0.85, 0.95, 0.8)
-        local cancel = "Tap or press B to cancel"
-        love.graphics.print(cancel, x + (w - self.fontSmall:getWidth(cancel)) / 2, y + h - 30)
+        Ui.centered(self.fontSmall, "Tap or press B to cancel", x + w / 2, y + h - 32, { 1, 1, 1 }, Ui.colors.ink, 1)
     end
 
     -- 13. Menu / dialogs on top of everything

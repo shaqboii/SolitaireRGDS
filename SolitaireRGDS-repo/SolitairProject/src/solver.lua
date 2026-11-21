@@ -300,7 +300,7 @@ end
 function Solver:search(visited, path)
     self.nodes = self.nodes + 1
     if self.nodes % 200 == 0 then
-        if self.nodes > Solver.maxNodes then error("budget") end
+        if self.nodes > (self.maxNodes or Solver.maxNodes) then error("budget") end
         coroutine.yield()
     end
 
@@ -379,7 +379,7 @@ local MAX_SECONDS = 15
 function Solver:step(seconds)
     if self.result then return self.result end
     self.cpu = self.cpu or 0
-    if self.cpu > MAX_SECONDS then self.result = "unknown" return "unknown" end
+    if self.cpu > (self.maxSeconds or MAX_SECONDS) then self.result = "unknown" return "unknown" end
     local t0 = os.clock()
     while os.clock() - t0 < seconds do
         local ok, res = coroutine.resume(self.co)

@@ -523,10 +523,8 @@ function Controls:pointerReleased(x, y)
     -- dropped on a pile it doesn't fit (not its own pile, not empty felt)?
     if not moved and wasRealDrag and sel then
         local over = self:hitTest(x, y)
-        if over and (over.type == "foundation" or over.type == "tableau")
-            and not (sel.source == "tableau" and over.type == "tableau" and sel.col == over.col) then
-            g:reject()
-        end
+        local own = over and sel.source == "tableau" and over.type == "tableau" and sel.col == over.col
+        if not own then g:reject(0.3) end
     end
     self:endDrag()
     -- a drag that went nowhere puts the card back and drops the selection

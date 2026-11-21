@@ -16,7 +16,8 @@ function Background.new(width, height)
     self.fps = 20
 
     self.entries = {}
-    self.selectedName = "builtin"
+    self.selectedName = "xmb_purple"
+    self.sceneWanted = "purple"
     self:refresh()
     self:select("auto")
     return self
@@ -24,7 +25,10 @@ end
 
 -- Scan assets/backgrounds for pictures the player can choose from
 function Background:refresh()
-    self.entries = { { name = "builtin", label = "Frutiger Aurora", kind = "procedural" } }
+    self.entries = {}
+    for _, key in ipairs({ "purple", "green", "pink", "blue" }) do
+        self.entries[#self.entries + 1] = { name = "xmb_" .. key, label = ({ purple = "XMB Purple", green = "XMB Green", pink = "XMB Rose", blue = "XMB Blue" })[key], kind = "procedural", key = key }
+    end
     for _, e in ipairs(Library.list("backgrounds", { "png", "jpg", "jpeg" })) do
         self.entries[#self.entries + 1] = { name = e.name, label = e.label, kind = "image", entry = e }
     end
@@ -78,6 +82,7 @@ function Background:select(name)
         end
         if #self.customFrames == 0 then pick = self.entries[1] end
     end
+    if pick.kind == "procedural" then self.sceneWanted = pick.key end
     self.selectedName = pick.name
     self.selectedLabel = pick.label
     print("Background: using '" .. pick.name .. "'")
@@ -102,188 +107,121 @@ end
 
 -- true when the picture changes by itself (the built-in scene, or an animated picture)
 function Background:isAnimated()
-    if #self.customFrames > 1 then return true end
-    return #self.customFrames == 0 and self.customImage == nil
+    return #self.customFrames > 1
 end
 
 -- ---------------------------------------------------------------------------------------------
--- Built-in scene: "Frutiger Aurora" (glossy sky, drifting aurora ribbons, bubbles, soft hills).
--- Built once into pictures/meshes; each frame only draws a few big shapes, so it is cheap.
+-- Built-in scenes: four STILL backgrounds in the style of the PlayStation 3 home menu (XMB):
+-- a soft gradient with a few wide, silky light waves. Each one is painted ONCE into a picture
+-- and then just drawn, so it costs almost nothing (and the top screen never has to re-send it).
 -- ---------------------------------------------------------------------------------------------
 
--- small repeatable random numbers (the scene looks the same every launch)
-local function lcg(seed)
-    local state = seed
-    return function()
-        state = (state * 1103515245 + 12345) % 2147483648
-        return state / 2147483648
-    end
-end
+local XMB = {
+    purple = { label = "XMB Purple",    top = {0.10, 0.03, 0.22}, mid = {0.36, 0.14, 0.58}, bot = {0.62, 0.30, 0.80}, wave = {0.85, 0.65, 1.00} },
+    green  = { label = "XMB Green",     top = {0.02, 0.12, 0.10}, mid = {0.06, 0.38, 0.28}, bot = {0.25, 0.66, 0.42}, wave = {0.70, 1.00, 0.80} },
+    pink   = { label = "XMB Rose",      top = {0.20, 0.03, 0.10}, mid = {0.62, 0.14, 0.32}, bot = {0.92, 0.38, 0.45}, wave = {1.00, 0.75, 0.78} },
+    blue   = { label = "XMB Blue",      top = {0.02, 0.06, 0.20}, mid = {0.08, 0.30, 0.66}, bot = {0.30, 0.62, 0.92}, wave = {0.70, 0.88, 1.00} },
+}
+local XMB_ORDER = { "purple", "green", "pink", "blue" }
 
-local function verticalGradient(w, h, stops)
+local function mix(a, b, t) return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t } end
+
+local function gradientMesh(w, h, p)
     local verts = {}
-    for _, st in ipairs(stops) do
-        local y = st[1] * h
-        verts[#verts + 1] = { 0, y, 0, 0, st[2], st[3], st[4], 1 }
-        verts[#verts + 1] = { w, y, 0, 0, st[2], st[3], st[4], 1 }
+    for i = 0, 8 do
+        local t = i / 8
+        local c = (t < 0.5) and mix(p.top, p.mid, t * 2) or mix(p.mid, p.bot, (t - 0.5) * 2)
+        verts[#verts + 1] = { 0, t * h, 0, 0, c[1], c[2], c[3], 1 }
+        verts[#verts + 1] = { w, t * h, 0, 0, c[1], c[2], c[3], 1 }
     end
     return love.graphics.newMesh(verts, "strip", "static")
 end
 
--- a hill: a strip from a wavy crest down to the bottom edge
-local function hill(w, h, baseY, amp, f1, f2, phase, crest, foot)
+-- one silky wave: a band that is bright in the middle and fades out at both edges
+local function waveMesh(w, yBase, amp, half, f1, f2, phase, color, alpha)
     local verts = {}
-    local n = 32
-    for i = 0, n do
-        local x = i * w / n
-        local y = baseY + amp * math.sin(i / n * f1 + phase) + amp * 0.4 * math.sin(i / n * f2 + phase * 2)
-        verts[#verts + 1] = { x, y, 0, 0, crest[1], crest[2], crest[3], 1 }
-        verts[#verts + 1] = { x, h, 0, 0, foot[1], foot[2], foot[3], 1 }
+    local steps = 48
+    for i = 0, steps do
+        local x = (i / steps) * w
+        local u = i / steps
+        local y = yBase + math.sin(u * math.pi * f1 + phase) * amp + math.sin(u * math.pi * f2 + phase * 1.7) * amp * 0.45
+        local fade = math.sin(u * math.pi) ^ 0.6          -- thins out towards the screen edges
+        local h = half * (0.35 + 0.65 * fade)
+        verts[#verts + 1] = { x, y - h, 0, 0, color[1], color[2], color[3], 0 }
+        verts[#verts + 1] = { x, y,     0, 0, color[1], color[2], color[3], alpha * fade }
+        verts[#verts + 1] = { x, y + h, 0, 0, color[1], color[2], color[3], 0 }
     end
-    return love.graphics.newMesh(verts, "strip", "static")
+    -- build as three-wide strip rows -> triangles
+    local tris = {}
+    for i = 0, steps - 1 do
+        local a = i * 3 + 1
+        local b = a + 3
+        tris[#tris + 1] = verts[a];     tris[#tris + 1] = verts[a + 1]; tris[#tris + 1] = verts[b]
+        tris[#tris + 1] = verts[a + 1]; tris[#tris + 1] = verts[b + 1]; tris[#tris + 1] = verts[b]
+        tris[#tris + 1] = verts[a + 1]; tris[#tris + 1] = verts[a + 2]; tris[#tris + 1] = verts[b + 1]
+        tris[#tris + 1] = verts[a + 2]; tris[#tris + 1] = verts[b + 2]; tris[#tris + 1] = verts[b + 1]
+    end
+    return love.graphics.newMesh(tris, "triangles", "static")
 end
 
--- one soft aurora ribbon: bright in the middle, fading to nothing at the top and bottom
-local function ribbon(w, yBase, amp, halfWidth, phase, color, alpha)
-    local verts = {}
-    local n = 36
-    local function point(i)
-        local t = i / n
-        local x = t * w
-        local yc = yBase + amp * math.sin(t * 5.2 + phase) + amp * 0.5 * math.sin(t * 11 + phase * 1.7)
-        local hw = halfWidth * (0.75 + 0.25 * math.sin(t * 7 + phase * 0.6))
-        return x, yc, hw
-    end
-    for i = 0, n - 1 do
-        local x1, y1, h1 = point(i)
-        local x2, y2, h2 = point(i + 1)
-        local c, a = color, alpha
-        local function v(x, y, al) return { x, y, 0, 0, c[1], c[2], c[3], al } end
-        -- upper half
-        verts[#verts + 1] = v(x1, y1 - h1, 0); verts[#verts + 1] = v(x2, y2 - h2, 0); verts[#verts + 1] = v(x1, y1, a)
-        verts[#verts + 1] = v(x2, y2 - h2, 0); verts[#verts + 1] = v(x2, y2, a);      verts[#verts + 1] = v(x1, y1, a)
-        -- lower half
-        verts[#verts + 1] = v(x1, y1, a);      verts[#verts + 1] = v(x2, y2, a);      verts[#verts + 1] = v(x1, y1 + h1, 0)
-        verts[#verts + 1] = v(x2, y2, a);      verts[#verts + 1] = v(x2, y2 + h2, 0); verts[#verts + 1] = v(x1, y1 + h1, 0)
-    end
-    return love.graphics.newMesh(verts, "triangles", "static")
-end
-
-function Background:buildAurora()
-    local W, H = self.width, self.height
-    local rnd = lcg(2007)
-    local scene = {}
-
-    -- the still part (sky, sun rays, clouds, bubbles, hills) is drawn once into a picture
-    local base = love.graphics.newCanvas(W, H)
-    local prev = love.graphics.getCanvas()
-    love.graphics.setCanvas(base)
-    love.graphics.clear(0, 0, 0, 1)
-    love.graphics.setBlendMode("alpha")
-
+local function paintScene(w, h, p)
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(verticalGradient(W, H, {
-        { 0.00, 0.10, 0.45, 0.85 },     -- deep sky blue
-        { 0.40, 0.30, 0.72, 0.95 },
-        { 0.66, 0.62, 0.92, 0.95 },     -- pale aqua
-        { 0.82, 0.80, 0.97, 0.70 },     -- lime glow at the horizon
-        { 1.00, 0.55, 0.90, 0.55 },
-    }))
-
-    -- soft light rays from the top left
-    for i = 1, 6 do
-        local a0 = 0.10 + i * 0.13
-        love.graphics.setColor(1, 1, 1, 0.05 + 0.02 * (i % 2))
-        love.graphics.polygon("fill", W * 0.05, -20, W * (a0 - 0.05), H, W * (a0 + 0.04), H)
-    end
-
-    -- clouds: stacked translucent circles give soft edges
-    for c = 1, 7 do
-        local cx, cy = rnd() * W, 120 + rnd() * 300
-        local size = 40 + rnd() * 50
-        for puff = 1, 6 do
-            local px = cx + (puff - 3.5) * size * 0.8
-            local py = cy + math.sin(puff * 1.7) * size * 0.25
-            local r = size * (0.7 + 0.5 * math.sin(puff * 2.1) ^ 2)
-            for layer = 1, 3 do
-                love.graphics.setColor(1, 1, 1, 0.10)
-                love.graphics.circle("fill", px, py, r * (1.35 - layer * 0.25))
-            end
-        end
-    end
-
-    -- glossy bubbles
-    for _ = 1, 22 do
-        local bx, by = rnd() * W, 60 + rnd() * 560
-        local br = 12 + rnd() * rnd() * 70
-        love.graphics.setColor(1, 1, 1, 0.07)
-        love.graphics.circle("fill", bx, by, br)
-        love.graphics.setColor(1, 1, 1, 0.45)
-        love.graphics.setLineWidth(2)
-        love.graphics.circle("line", bx, by, br)
-        love.graphics.setColor(1, 1, 1, 0.55)
-        love.graphics.ellipse("fill", bx - br * 0.35, by - br * 0.4, br * 0.28, br * 0.16)
-    end
-
-    -- rolling hills at the bottom
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(hill(W, H, H * 0.86, 26, 5.0, 9.0, 0.6, { 0.45, 0.85, 0.55 }, { 0.20, 0.62, 0.40 }))
-    love.graphics.draw(hill(W, H, H * 0.92, 20, 4.0, 8.0, 2.4, { 0.32, 0.75, 0.42 }, { 0.12, 0.50, 0.32 }))
-
-    love.graphics.setCanvas(prev)
-    scene.base = base
-
-    -- two sets of aurora ribbons; the picture fades between them to make the light drift
-    local colors = {
-        { 0.25, 1.00, 0.85 },   -- teal
-        { 0.60, 1.00, 0.55 },   -- green
-        { 0.40, 0.70, 1.00 },   -- blue
-        { 0.80, 0.65, 1.00 },   -- violet
-    }
-    scene.layers = {}
-    for layer = 1, 2 do
-        local meshes = {}
-        for i, col in ipairs(colors) do
-            local phase = (i * 1.3) + (layer - 1) * 2.4
-            meshes[i] = ribbon(W, 110 + i * 62, 34 + i * 6, 70 + i * 8, phase, col, 0.34)
-        end
-        scene.layers[layer] = meshes
-    end
-    self.scene = scene
-end
-
--- draws the Frutiger Aurora scene; falls back to a plain gradient if the pieces can't be built
-function Background:drawAurora()
-    if not self.scene and not self.sceneFailed then
-        local ok, err = pcall(self.buildAurora, self)
-        if not ok then
-            self.sceneFailed = true
-            print("Background: aurora scene failed, using a plain gradient: " .. tostring(err))
-        end
-    end
-    if not self.scene then
-        love.graphics.setColor(0.25, 0.65, 0.9, 1)
-        love.graphics.rectangle("fill", 0, 0, self.width, self.height)
-        return
-    end
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(self.scene.base, 0, 0)
-
-    -- slow breathing between the two ribbon sets
-    local k = 0.5 + 0.5 * math.sin(self.time * 0.45)
+    love.graphics.draw(gradientMesh(w, h, p))
     love.graphics.setBlendMode("add")
-    for layer = 1, 2 do
-        local alpha = (layer == 1) and (1 - k) or k
-        love.graphics.setColor(1, 1, 1, 0.25 + 0.75 * alpha)
-        for _, m in ipairs(self.scene.layers[layer]) do love.graphics.draw(m) end
+    local waves = {
+        { 0.58, 70, 220, 1.6, 3.1, 0.3, 0.16 },
+        { 0.64, 55, 150, 2.1, 4.3, 1.9, 0.14 },
+        { 0.52, 90, 260, 1.2, 2.6, 3.4, 0.10 },
+        { 0.70, 40, 110, 2.8, 5.0, 5.0, 0.12 },
+        { 0.46, 60, 180, 1.9, 3.7, 2.4, 0.07 },
+    }
+    for _, wv in ipairs(waves) do
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(waveMesh(w, wv[1] * h, wv[2], wv[3], wv[4], wv[5], wv[6], p.wave, wv[7]))
     end
     love.graphics.setBlendMode("alpha")
+end
+
+-- paints the chosen scene once into a picture (falls back to a plain gradient if that fails)
+function Background:buildScene(key)
+    local p = XMB[key] or XMB.purple
+    self.scene = nil
+    local ok, canvas = pcall(function()
+        local c = love.graphics.newCanvas(self.width, self.height)
+        local prev = love.graphics.getCanvas()
+        love.graphics.push("all")
+        love.graphics.setCanvas(c)
+        love.graphics.clear(0, 0, 0, 1)
+        paintScene(self.width, self.height, p)
+        love.graphics.pop()
+        love.graphics.setCanvas(prev)
+        return c
+    end)
+    if ok and canvas then
+        self.scene = { canvas = canvas }
+    else
+        print("Background: scene canvas failed, using a plain gradient: " .. tostring(canvas))
+        local ok2, mesh = pcall(gradientMesh, self.width, self.height, p)
+        self.scene = ok2 and { mesh = mesh } or { flat = p.mid }
+    end
+    self.sceneKey = key
+end
+
+function Background:drawScene()
+    if not self.scene or self.sceneKey ~= self.sceneWanted then self:buildScene(self.sceneWanted) end
+    local sc = self.scene
+    love.graphics.setColor(1, 1, 1, 1)
+    if sc.canvas then love.graphics.draw(sc.canvas, 0, 0)
+    elseif sc.mesh then love.graphics.draw(sc.mesh)
+    else
+        love.graphics.setColor(sc.flat[1], sc.flat[2], sc.flat[3], 1)
+        love.graphics.rectangle("fill", 0, 0, self.width, self.height)
+    end
 end
 
 -- How many pictures a second the top screen should be sent (nil = it doesn't move)
 function Background:animationFps()
     if #self.customFrames > 1 then return math.min(self.fps, 12) end
-    if #self.customFrames == 0 and self.customImage == nil then return 8 end
     return nil
 end
 
@@ -312,7 +250,7 @@ function Background:draw(solitaire, fontTitle, fontMedium, fontSmall, topMode, i
         love.graphics.setColor(1, 1, 1, 1)
         drawCover(self.customImage, self.width, self.height)
     else
-        self:drawAurora()
+        self:drawScene()
 
         love.graphics.setFont(fontTitle)
         local titleText = "KLONDIKE SOLITAIRE"
